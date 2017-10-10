@@ -17,183 +17,134 @@ require 'cgi'
 require 'openssl'
 require 'optparse'
 
-
-ENV['TZ'] = 'GMT'
-
-
 module Akamai
-    class AuthTokenError < Exception
-        """Base-class for all exceptions raised by AuthToken Class"""
+  class AuthTokenError < StandardError
+    def initialize(msg="My default message")
+      super
     end
+  end
 
+  class AuthToken
+    class << self
+      attr_accessor :token_type, :token_name, :key, :algorithm, :salt,
+        :start_time, :end_time, :window_seconds, :field_delimiter,
+        :acl_delimiter, :escape_early, :verbose
 
-    class AuthToken
-        attr_accessor :token_type, :token_name, :key, :algorithm, :salt, 
-                :start_time, :end_time, :window_secondse, :field_delimiter, 
-                :acl_delimiter, :escape_early, :verbose
-        
-        @@acl_delimiter = '!'
-        def self.ACL_DELIMITER
-            @@acl_delimiter
-        end
-        
-        def initialize(token_type: nil, token_name: '__token__', key: nil,
-                algorithm: 'sha256', salt: nil, start_time: nil, end_time: nil,
-                window_seconds: nil, field_delimiter: '~', escape_early: false, verbose: false)
+      ACL_DELIMITER = '!'
 
-            @token_type = token_type
-            @token_name = token_name
-            @start_time = start_time
-            @end_time = end_time
-            @window_seconds = window_seconds
-            if !key || key.length <= 0
-                raise AuthTokenError, 
-                    'You must provide a secret in order to generate a new token.'
-            end
-            @key = key
-            @algorithm = algorithm
-            @salt = salt
-            @field_delimiter = field_delimiter
-            @escape_early = escape_early
-            @verbose = verbose
+      def generate_token(token_type: "URL", token_name: 'hdnts', key: nil,
+                         algorithm: 'sha256', salt: nil, start_time: 'now', end_time: nil,
+                         window_seconds: nil, field_delimiter: '~', escape_early: false,
+                         verbose: false, url: nil, acl: nil,
+                         ip: nil, payload: nil, session_id: nil)
+
+        raise AuthTokenError, 'You must provide a secret in order to generate a new token.' if (key.nil? || key.length <= 0)
+
+        if start_time.to_s.downcase == 'now'
+          start_time = Time.new.getgm.to_i
+        else
+          begin
+            start_time = 0 if start_time < 0
+          rescue
+            raise AuthTokenError, 'start_time must be UNIX timestamps or now'
+          end
         end
 
-        def _escapeEarly(text)
-            if @escape_early
-                return CGI::escape(text).gsub(/(%..)/) {$1.downcase}
-            else
-                return text
-            end
+        raise AuthTokenError, 'You must provide an expiration time or a duration window..' if (end_time.nil? && window_seconds.nil?)
+
+        if end_time
+          begin
+            end_time = 0 if end_time < 0
+          rescue
+            raise AuthTokenError, 'end_time must be UNIX timestamps'
+          end
         end
 
-        def generateToken(url: nil, acl: nil, start_time: nil, end_time: nil, window_seconds: nil,
-                        ip: nil, payload: nil, session_id: nil)
-            
-            if !start_time
-                start_time = @start_time
-            end
-            if !end_time
-                end_time = @end_time
-            end
-            if !window_seconds
-                window_seconds = @window_seconds
-            end
-
-            if start_time.to_s.downcase == 'now'
-                start_time = Time.new.getgm.to_i
-            elsif start_time
-                begin
-                    if start_time <= 0
-                        raise AuthTokenError, 'start_time must be ( > 0 )'
-                    end
-                rescue
-                    raise AuthTokenError, 'start_time must be numeric or now'
-                end
-                
-            end
-
-            if end_time
-                begin
-                    if end_time <= 0
-                        raise AuthTokenError, 'end_time must be ( > 0 )'
-                    end
-                rescue
-                    raise AuthTokenError, 'end_time must be numeric'
-                end
-            end
-
-            if window_seconds
-                begin
-                    if window_seconds <= 0
-                        raise AuthTokenError, 'window_seconds must be ( > 0 )'
-                    end
-                rescue
-                    raise AuthTokenError, 'window_seconds must be numeric'
-                end
-            end
-
-            if !end_time
-                if window_seconds
-                    if !start_time
-                        end_time = Time.new.getgm.to_i + window_seconds
-                    else
-                        end_time = start_time + window_seconds
-                    end
-                else
-                    raise AuthTokenError, 'You must provide an expiration time or a duration window..'
-                end
-            end
-
-            if start_time && end_time <= start_time
-                raise AuthTokenError, 'Token will have already expired.'
-            end
-
-            if (!acl && !url) || (acl && url)
-                raise AuthTokenError, 'You must provide a URL or an ACL'
-            end
-
-            if @verbose
-                puts "Akamai Token Generation Parameters"
-                puts "Token Type      : #{@token_type}"
-                puts "Token Name      : #{@token_name}"
-                puts "Start Time      : #{start_time}"
-                puts "End Time        : #{end_time}"
-                puts "Window(seconds) : #{window_seconds}"
-                puts "IP              : #{ip}"
-                puts "URL             : #{url}"
-                puts "ACL             : #{acl}"
-                puts "Key/Secret      : #{@key}"
-                puts "Payload         : #{payload}"
-                puts "Algo            : #{@algo}"
-                puts "Salt            : #{@salt}"
-                puts "Session ID      : #{session_id}"
-                puts "Field Delimiter : #{@field_delimiter}"
-                puts "ACL Delimiter   : #{@@acl_delimiter}"
-                puts "Escape Early    : #{@escape_early}"
-            end
-
-            hash_code = Array.new
-            new_token = Array.new
-
-            if ip
-                new_token.push('ip=%s' % _escapeEarly(ip))
-            end
-            if start_time
-                new_token.push('st=%s' % start_time)
-            end
-            new_token.push('exp=%s' % end_time)
-
-            if acl
-                new_token.push('acl=%s' % acl)
-            end
-            if session_id
-                new_token.push('id=%s' % _escapeEarly(session_id))
-            end
-            if payload
-               new_token.push('data=%s' % _escapeEarly(payload))
-            end
-
-            hash_code = new_token.clone
-            
-            if url and !acl
-                hash_code.push('url=%s' % _escapeEarly(url))
-            end
-
-            if @salt
-                hash_code.push('salt=%s' % @salt)
-            end
-            if !(['sha256', 'sha1', 'md5'].include? @algorithm)
-                raise AuthTokenError, 'Unknown algorithm'
-            end
-            
-            bin_key = Array(@key.gsub(/\s/,'')).pack("H*")
-            digest = OpenSSL::Digest.new(@algorithm)
-            token_hmac = OpenSSL::HMAC.new(bin_key, digest)
-            token_hmac.update(hash_code.join(@field_delimiter))
-
-            new_token.push('hmac=%s' % token_hmac)
-
-            return new_token.join(@field_delimiter)
+        if window_seconds
+          begin
+            window_seconds = 0 if window_seconds < 0
+          rescue
+            raise AuthTokenError, 'window_seconds must be numeric'
+          end
+          end_time = start_time + window_seconds
         end
+
+        if end_time <= start_time
+          raise AuthTokenError, 'Token will have already expired.'
+        end
+
+        if (acl.nil? && url.nil?) || (acl && url)
+          raise AuthTokenError, 'You must provide a URL or an ACL'
+        end
+
+        if verbose
+          puts "Akamai Token Generation Parameters"
+          puts "Token Type      : #{token_type}"
+          puts "Token Name      : #{token_name}"
+          puts "Start Time      : #{start_time}"
+          puts "End Time        : #{end_time}"
+          puts "Window(seconds) : #{window_seconds}"
+          puts "IP              : #{ip}"
+          puts "URL             : #{url}"
+          puts "ACL             : #{acl}"
+          puts "Key/Secret      : #{key}"
+          puts "Payload         : #{payload}"
+          puts "Algo            : #{algo}"
+          puts "Salt            : #{salt}"
+          puts "Session ID      : #{session_id}"
+          puts "Field Delimiter : #{field_delimiter}"
+          puts "ACL Delimiter   : #{ACL_DELIMITER}"
+          puts "Escape Early    : #{escape_early}"
+        end
+
+        hash_code = Array.new
+        new_token = Array.new
+
+        if ip
+          new_token.push('ip=%s' % escape_early(ip))
+        end
+        if start_time
+          new_token.push('st=%s' % start_time)
+        end
+        new_token.push('exp=%s' % end_time)
+
+        if acl
+          new_token.push('acl=%s' % acl)
+        end
+        if session_id
+          new_token.push('id=%s' % escape_early(session_id))
+        end
+        if payload
+          new_token.push('data=%s' % escape_early(payload))
+        end
+
+        hash_code = new_token.clone
+
+        if url and !acl
+          hash_code.push('url=%s' % escape_early(url))
+        end
+
+        if salt
+          hash_code.push('salt=%s' % salt)
+        end
+
+        if !(['sha256', 'sha1', 'md5'].include? algorithm)
+          raise AuthTokenError, 'Unknown algorithm'
+        end
+
+        bin_key = Array(key.gsub(/\s/,'')).pack("H*")
+        digest = OpenSSL::Digest.new(algorithm)
+        token_hmac = OpenSSL::HMAC.new(bin_key, digest)
+        token_hmac.update(hash_code.join(field_delimiter))
+
+        new_token.push('hmac=%s' % token_hmac)
+
+        return ("%s=" % token_name) + new_token.join(field_delimiter)
+      end
+
+      def escape_early(text)
+        return CGI::escape(text).gsub(/(%..)/) {$1.downcase}
+      end
     end
+  end
 end
