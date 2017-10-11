@@ -89,7 +89,7 @@ module Akamai
           puts "ACL             : #{acl}"
           puts "Key/Secret      : #{key}"
           puts "Payload         : #{payload}"
-          puts "Algo            : #{algo}"
+          puts "Algo            : #{algorithm}"
           puts "Salt            : #{salt}"
           puts "Session ID      : #{session_id}"
           puts "Field Delimiter : #{field_delimiter}"
