@@ -10,12 +10,30 @@ describe Akamai::AuthToken do
       end
     end
 
+    context 'token name' do
+      it 'will not include token name when show_token_name is false' do
+        expect(Akamai::AuthToken.generate_token(key: 'asdf1234', show_token_name: false, window_seconds: 14400, acl: '/*')).not_to include('hdnts=')
+      end
+
+      it 'will include token name when show_token_name is not provided (default=true)' do
+        expect(Akamai::AuthToken.generate_token(key: 'asdf1234', window_seconds: 14400, acl: '/*')).to include('hdnts=')
+      end
+    end
+
     context "start time" do
       it "will raise AuthTokenError if start_time is string other than 'now'" do
         expect{
           Akamai::AuthToken.generate_token(key: "asdf1234",
                                           start_time: 'future')
         }.to raise_error(Akamai::AuthTokenError, "start_time must be UNIX timestamps or now")
+      end
+
+      it 'will not include start time when show_start_time is false' do
+        expect(Akamai::AuthToken.generate_token(key: 'asdf1234', show_start_time: false, window_seconds: 14400, acl: '/*')).not_to include('st=')
+      end
+
+      it 'will include start time when show_start_time is not provided (default true)' do
+        expect(Akamai::AuthToken.generate_token(key: 'asdf1234', window_seconds: 14400, acl: '/*')).to include('st=')
       end
     end
 

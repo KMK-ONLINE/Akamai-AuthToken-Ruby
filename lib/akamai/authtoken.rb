@@ -36,7 +36,7 @@ module Akamai
                          algorithm: 'sha256', salt: nil, start_time: 'now', end_time: nil,
                          window_seconds: nil, field_delimiter: '~', escape_early: false,
                          verbose: false, url: nil, acl: nil,
-                         ip: nil, payload: nil, session_id: nil)
+                         ip: nil, payload: nil, session_id: nil, show_start_time: true, show_token_name: true)
 
         raise AuthTokenError, 'You must provide a secret in order to generate a new token.' if (key.nil? || key.length <= 0)
 
@@ -103,7 +103,7 @@ module Akamai
         if ip
           new_token.push('ip=%s' % escape_early(ip))
         end
-        if start_time
+        if start_time && show_start_time
           new_token.push('st=%s' % start_time)
         end
         new_token.push('exp=%s' % end_time)
@@ -136,10 +136,11 @@ module Akamai
         digest = OpenSSL::Digest.new(algorithm)
         token_hmac = OpenSSL::HMAC.new(bin_key, digest)
         token_hmac.update(hash_code.join(field_delimiter))
+        token_name = show_token_name ? ("%s=" % token_name) : ''
 
         new_token.push('hmac=%s' % token_hmac)
 
-        return ("%s=" % token_name) + new_token.join(field_delimiter)
+        return token_name + new_token.join(field_delimiter)
       end
 
       def escape_early(text)
